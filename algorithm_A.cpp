@@ -31,34 +31,36 @@ using namespace std;
 #define EAST 1
 #define NORTH 1
 #define SOUTH -1
-int algorithm_A_round = 0;
-int first_stepX, first_stepY;
-bool corner_tragety=true;
+#define MaxScore 100000
+#define MinScore -100000
+
 int num_to_be_full(int orbX, int orbY, Board board) {
-	return board.get_capacity(orbX,orbY) - board.get_orbs_num(orbX, orbY);
+	return board.get_capacity(orbX, orbY) - board.get_orbs_num(orbX, orbY);
 }
 
-double cell_value_estimate(int capacity, int orbs_num) {
+float cell_value_estimate(int capacity, int orbs_num) {
+	float cell_value = 0;
 	if (capacity == 2) {
-		return 2;
+		cell_value = 6;
 	}
 	else if (capacity == 3) {
 		if (orbs_num == 1)
-			return 0.75;
+			cell_value = 2;
 		else if (orbs_num == 2)
-			return 2.5;
+			cell_value = 8;
 	}
 	else if (capacity == 4) {
 		if (orbs_num == 1)
-			return 0.5;
+			cell_value = 1;
 		else if (orbs_num == 2)
-			return 1.2;
+			cell_value = 3;
 		else if (orbs_num == 3)
-			return 3;
+			cell_value = 10;
 	}
+	return cell_value;
 }
 
-double orbcompare_est(int orbX, int orbY, int com_orbX, int com_orbY,Board board) {
+double orbcompare_est(int orbX, int orbY, int com_orbX, int com_orbY, Board board) {
 	if (num_to_be_full(orbX, orbY, board) <= num_to_be_full(com_orbX, com_orbY, board))
 		return -cell_value_estimate(board.get_capacity(orbX, orbY), board.get_orbs_num(orbX, orbY));
 	else
@@ -73,18 +75,21 @@ private:
 	MyTreeNode* nextNode;
 	MyTreeNode* nextRoundNode;
 	int index[2];    // Record which orb result in this MyTreeNode
+	float score = 0;
 public:
 	MyTreeNode();
 	MyTreeNode(Board board);
 	MyTreeNode(Board board, int x, int y);
 	void setNextNode(MyTreeNode* MyTreeNode);
 	void setNextRoundNode(MyTreeNode* MyTreeNode);
+	void setScore(float Score);
 	MyTreeNode* getNextNode();
 	MyTreeNode* getNextRoundNode();
 	MyTreeNode* getTail();
 	Board getBoardState();
 	int getX();
 	int getY();
+	float getScore();
 };
 
 class MygameTree {
@@ -94,8 +99,8 @@ private:
 	Player* opponent;
 public:
 	MygameTree(Board board, Player* player);
-	int* chooseOrb();   // Use the four-level look-ahead game tree to determine the next step of orb
-	int insertNextRound(MyTreeNode* Node, Player currentTurn);
+	MyTreeNode* chooseOrb();   // Use the four-level look-ahead game tree to determine the next step of orb
+	void insertNextRound(MyTreeNode* Node, Player currentTurn);
 	int levelLookAhead();  // Add a new level of look-ahead in MygameTree
 	int numAtLevel(MyTreeNode* Node);
 	float BoardEvaluator(MyTreeNode* Node);
@@ -123,6 +128,10 @@ void MyTreeNode::setNextNode(MyTreeNode* Node) {
 
 void MyTreeNode::setNextRoundNode(MyTreeNode* Node) {
 	this->nextRoundNode = Node;
+}
+
+void MyTreeNode::setScore(float Score) {
+	this->score = Score;
 }
 
 MyTreeNode* MyTreeNode::getNextNode() {
@@ -155,6 +164,10 @@ int MyTreeNode::getY() {
 	return this->index[1];
 }
 
+float MyTreeNode::getScore() {
+	return this->score;
+}
+
 /*------------------------Implement class MygameTree functions----------------------------*/
 MygameTree::MygameTree(Board board, Player* player) {
 	this->root = new MyTreeNode(board);
@@ -168,66 +181,72 @@ MygameTree::MygameTree(Board board, Player* player) {
 	this->opponent = new Player(colorOpponent);
 }
 
-int* MygameTree::chooseOrb() {
+MyTreeNode* MygameTree::chooseOrb() {
+	/*
+	使用min-max方法來選擇放置哪個位置
+	*/
 	this->insertNextRound(this->root, *this->player);
 	MyTreeNode* firstLevelNode = this->root->getNextRoundNode()->getNextNode();
+	MyTreeNode* bestNode = this->root->getNextRoundNode()->getNextNode();
 	int index[2];
 	index[0] = firstLevelNode->getX();
 	index[1] = firstLevelNode->getY();
-	float bestScore = -100;
-	float tempScore = 0;
-	long numRoundNode = 0;
-	
+	float bestScore = MinScore - 1;
+
 	for (firstLevelNode; firstLevelNode != NULL; firstLevelNode = firstLevelNode->getNextNode()) {
-		tempScore = this->BoardEvaluator(firstLevelNode);
-		numRoundNode = insertNextRound(firstLevelNode, *this->opponent);
+		float tempScore = this->BoardEvaluator(firstLevelNode);
+		if (tempScore == MaxScore) {
+			bestNode = firstLevelNode;
+			return bestNode;
+		}
+		insertNextRound(firstLevelNode, *this->opponent);
 		MyTreeNode* secondLevelNode = firstLevelNode->getNextRoundNode()->getNextNode();
+		float maxWinOneLevelScore = MinScore - 1;//用來記住跑完整個第二層的時候 自己最多會贏多少分
+
 		for (secondLevelNode; secondLevelNode != NULL; secondLevelNode = secondLevelNode->getNextNode()) {
-			tempScore += 0.8 * this->BoardEvaluator(secondLevelNode) / numRoundNode;
-			numRoundNode = numRoundNode * insertNextRound(secondLevelNode, *this->player);
+			float tempScore = this->BoardEvaluator(secondLevelNode);
+			insertNextRound(secondLevelNode, *this->player);
 			MyTreeNode* thirdLevelNode = secondLevelNode->getNextRoundNode()->getNextNode();
+			float maxLoseSecondLevelScore = MinScore - 1;//用來記住跑完整個第三層的時候 對面的玩家最多會輸多少分
+
 			for (thirdLevelNode; thirdLevelNode != NULL; thirdLevelNode = thirdLevelNode->getNextNode()) {
-				tempScore += 0.6 * this->BoardEvaluator(thirdLevelNode) / numRoundNode;
+				thirdLevelNode->setScore(this->BoardEvaluator(thirdLevelNode));
+				if (thirdLevelNode->getScore() > maxLoseSecondLevelScore)
+					maxLoseSecondLevelScore = thirdLevelNode->getScore();
 			}
+			if (tempScore != MaxScore)
+				secondLevelNode->setScore((-1) * maxLoseSecondLevelScore);
+			else
+				secondLevelNode->setScore(MaxScore);
+
+			if (secondLevelNode->getScore() > maxWinOneLevelScore)
+				maxWinOneLevelScore = secondLevelNode->getScore();
 		}
-		if (tempScore > bestScore) {
-			bestScore = tempScore;
-			index[0] = firstLevelNode->getX();
-			index[1] = firstLevelNode->getY();
+
+		firstLevelNode->setScore((-1) * maxWinOneLevelScore);
+		if (firstLevelNode->getScore() > bestScore) {
+			bestScore = firstLevelNode->getScore();
+			bestNode = firstLevelNode;
 		}
-		/*MyTreeNode* tmp = firstLevelNode;
-		MyTreeNode* tmp2 = tmp->getNextRoundNode();
-		while (tmp2 != NULL) {
-			MyTreeNode* tmp3 = tmp2->getNextRoundNode();
-			while (tmp3 != NULL) {
-				MyTreeNode* temp = tmp3;
-				tmp3 = tmp3->getNextNode();
-				delete temp;
-			}
-			MyTreeNode* temp = tmp2;
-			tmp2 = tmp2->getNextNode();
-			delete temp;
-		}*/
 	}
-	return index;
+	return bestNode;
 }
 
-int MygameTree::insertNextRound(MyTreeNode* Node, Player currentTurn) {
+void MygameTree::insertNextRound(MyTreeNode* Node, Player currentTurn) {
 	// Insert all the cases of next round in MygameTree
 	// Input : currentTurn indicates which player is going to put the orb in this turn
-	int numNewState = 0;
+
 	char color = currentTurn.get_color();
 	Board cur_boardState = Node->getBoardState();
-	
+
 	// Find first next round node using random
 
-	MyTreeNode* virtualNode= new MyTreeNode(cur_boardState, 0, 0);
+	MyTreeNode* virtualNode = new MyTreeNode(cur_boardState, 0, 0);
 	Node->setNextRoundNode(virtualNode);
 
 	for (int i = 0; i < ROW; i++) {
 		for (int j = 0; j < COL; j++) {
 			if (cur_boardState.get_cell_color(i, j) == color || cur_boardState.get_cell_color(i, j) == 'w') {
-				numNewState++;
 				Board tmp = cur_boardState;
 				tmp.place_orb(i, j, &currentTurn);
 				MyTreeNode* newNode = new MyTreeNode(tmp, i, j);
@@ -236,8 +255,9 @@ int MygameTree::insertNextRound(MyTreeNode* Node, Player currentTurn) {
 			}
 		}
 	}
-	return numNewState;
+	return;
 }
+
 
 float MygameTree::BoardEvaluator(MyTreeNode* Node) {
 	// This is the simple board evaluator
@@ -252,95 +272,28 @@ float MygameTree::BoardEvaluator(MyTreeNode* Node) {
 	for (int i = 0; i < ROW; i++) {
 		for (int j = 0; j < COL; j++) {
 			if (board.get_cell_color(i, j) == colorPlayer) {
-				orbScore += cell_value_estimate(board.get_capacity(i,j), board.get_orbs_num(i,j));
+				orbScore += cell_value_estimate(board.get_capacity(i, j), board.get_orbs_num(i, j));
+				orbPlayer++;
 			}
 			else if (board.get_cell_color(i, j) == colorOpponent) {
-				orbScore -= cell_value_estimate(board.get_capacity(i, j), board.get_orbs_num(i,j));
+				orbScore -= cell_value_estimate(board.get_capacity(i, j), board.get_orbs_num(i, j));
+				orbOpponent++;
 			}
 		}
 	}
-
-	if (board.get_cell_color(orbX, orbY) == colorPlayer) {
-		if (index_range_illegal(orbX + EAST, orbY) == true) {
-			if (board.get_cell_color(orbX + EAST, orbY) == colorOpponent) {
-				orbScore += orbcompare_est(orbX,orbY, orbX + EAST, orbY,board);
-			}
-		}
-		if (index_range_illegal(orbX - WEST, orbY) == true) {
-			if (board.get_cell_color(orbX - WEST, orbY) == colorOpponent) {
-				if (board.get_cell_color(orbX + EAST, orbY) == colorOpponent) {
-					orbScore += orbcompare_est(orbX, orbY, orbX + EAST, orbY, board);
-				}
-			}
-		}
-		if (index_range_illegal(orbX, orbY + NORTH) == true) {
-			if (board.get_cell_color(orbX, orbY + NORTH) == colorOpponent) {
-				if (board.get_cell_color(orbX + EAST, orbY) == colorOpponent) {
-					orbScore += orbcompare_est(orbX, orbY, orbX + EAST, orbY, board);
-				}
-			}
-		}
-		if (index_range_illegal(orbX, orbY - SOUTH) == true) {
-			if (board.get_cell_color(orbX, orbY - SOUTH) == colorOpponent) {
-				if (board.get_cell_color(orbX + EAST, orbY) == colorOpponent) {
-					orbScore += orbcompare_est(orbX, orbY, orbX + EAST, orbY, board);
-				}
-			}
-		}
+	if (orbOpponent == 0 && orbPlayer != 1) {
+		return MaxScore;
 	}
 
 	return orbScore;
 }
 
-
 void algorithm_A(Board board, Player player, int index[]) {
 	MygameTree gt(board, &player);
-	algorithm_A_round++;
 	int row, col;
-	if (algorithm_A_round == 1) {
-		if (board.get_cell_color(0, 0) == 'w') {
-			row = 0;
-			col = 0;
-		}
-		else if (board.get_cell_color(4, 0) == 'w') {
-			row = 4;
-			col = 0;
-		}
-		else if (board.get_cell_color(0, 5) == 'w') {
-			row = 0;
-			col = 5;
-		}
-		else if (board.get_cell_color(4, 5) == 'w') {
-			row = 4;
-			col = 5;
-		}
-		index[0] = row;
-		index[1] = col;
-		return;
-	}
-	else if (algorithm_A_round ==2) {
-		if (board.get_cell_color(0, 0) == 'w') {
-			row = 0;
-			col = 0;
-		}
-		else if (board.get_cell_color(4, 0) == 'w') {
-			row = 4;
-			col = 0;
-		}
-		else if (board.get_cell_color(0, 5) == 'w') {
-			row = 0;
-			col = 5;
-		}
-		else if (board.get_cell_color(4, 5) == 'w') {
-			row = 4;
-			col = 5;
-		}
-		index[0] = row;
-		index[1] = col;
-		return;
-	}
-	int* choose = gt.chooseOrb();
-	index[0] = choose[0];
-	index[1] = choose[1];
+	MyTreeNode* choose = gt.chooseOrb();
+	index[0] = choose->getX();
+	index[1] = choose->getY();
 
 }
+
