@@ -34,12 +34,16 @@ using namespace std;
 #define MaxScore 100000
 #define MinScore -100000
 
-int num_to_be_full(int orbX, int orbY, Board board) {
+int num_to_be_full(int orbX, int orbY, Board& board) {
 	return board.get_capacity(orbX, orbY) - board.get_orbs_num(orbX, orbY);
 }
 
 float cell_value_estimate(int capacity, int orbs_num) {
-	float cell_value = 0;
+	float cell_value = MaxScore;
+
+	if (orbs_num == 0)
+		return 0;
+
 	if (capacity == 2) {
 		cell_value = 6;
 	}
@@ -57,8 +61,43 @@ float cell_value_estimate(int capacity, int orbs_num) {
 		else if (orbs_num == 3)
 			cell_value = 10;
 	}
+
 	return cell_value;
 }
+
+
+float attack_value_estimate(int orbX, int  orbY, Board& board, char colorPlayer) {
+	int num = num_to_be_full(orbX, orbY, board);
+	float value = -2 * cell_value_estimate(board.get_capacity(orbX, orbY), board.get_orbs_num(orbX, orbY)) / 3;
+	float est = 0;
+
+	if (orbX + 1 < ROW) {
+		if (board.get_cell_color(orbX + 1, orbY) != colorPlayer && num_to_be_full(orbX + 1, orbY, board) <= num)
+			return value;
+		if (board.get_cell_color(orbX + 1, orbY) != colorPlayer && num_to_be_full(orbX + 1, orbY, board) > num)
+			est += cell_value_estimate(board.get_capacity(orbX + 1, orbY), board.get_orbs_num(orbX + 1, orbY)) / 3;
+	}
+	if (orbX - 1 >= 0) {
+		if (board.get_cell_color(orbX - 1, orbY) != colorPlayer && num_to_be_full(orbX - 1, orbY, board) <= num)
+			return value;
+		if (board.get_cell_color(orbX - 1, orbY) != colorPlayer && num_to_be_full(orbX - 1, orbY, board) > num)
+			est += cell_value_estimate(board.get_capacity(orbX - 1, orbY), board.get_orbs_num(orbX - 1, orbY)) / 3;
+	}
+	if (orbY + 1 < COL) {
+		if (board.get_cell_color(orbX, orbY + 1) != colorPlayer && num_to_be_full(orbX, orbY + 1, board) <= num)
+			return value;
+		if (board.get_cell_color(orbX, orbY + 1) != colorPlayer && num_to_be_full(orbX, orbY + 1, board) > num)
+			est += cell_value_estimate(board.get_capacity(orbX, orbY + 1), board.get_orbs_num(orbX, orbY + 1)) / 3;
+	}
+	if (orbY - 1 >= 0) {
+		if (board.get_cell_color(orbX, orbY - 1) != colorPlayer && num_to_be_full(orbX, orbY - 1, board) <= num)
+			return value;
+		if (board.get_cell_color(orbX, orbY - 1) != colorPlayer && num_to_be_full(orbX, orbY - 1, board) > num)
+			est += cell_value_estimate(board.get_capacity(orbX, orbY - 1), board.get_orbs_num(orbX, orbY - 1)) / 3;
+	}
+	return est;
+}
+
 
 double orbcompare_est(int orbX, int orbY, int com_orbX, int com_orbY, Board board) {
 	if (num_to_be_full(orbX, orbY, board) <= num_to_be_full(com_orbX, com_orbY, board))
@@ -205,17 +244,18 @@ MyTreeNode* MygameTree::chooseOrb() {
 
 		for (secondLevelNode; secondLevelNode != NULL; secondLevelNode = secondLevelNode->getNextNode()) {
 			float tempScore = this->BoardEvaluator(secondLevelNode);
-			insertNextRound(secondLevelNode, *this->player);
-			MyTreeNode* thirdLevelNode = secondLevelNode->getNextRoundNode()->getNextNode();
-			float maxLoseSecondLevelScore = MinScore - 1;//用來記住跑完整個第三層的時候 對面的玩家最多會輸多少分
 
-			for (thirdLevelNode; thirdLevelNode != NULL; thirdLevelNode = thirdLevelNode->getNextNode()) {
-				thirdLevelNode->setScore(this->BoardEvaluator(thirdLevelNode));
-				if (thirdLevelNode->getScore() > maxLoseSecondLevelScore)
-					maxLoseSecondLevelScore = thirdLevelNode->getScore();
-			}
-			if (tempScore != MaxScore)
+			if (tempScore < MaxScore) {
+				insertNextRound(secondLevelNode, *this->player);
+				MyTreeNode* thirdLevelNode = secondLevelNode->getNextRoundNode()->getNextNode();
+				float maxLoseSecondLevelScore = MinScore - 1;//用來記住跑完整個第三層的時候 對面的玩家最多會輸多少分
+				for (thirdLevelNode; thirdLevelNode != NULL; thirdLevelNode = thirdLevelNode->getNextNode()) {
+					thirdLevelNode->setScore(this->BoardEvaluator(thirdLevelNode));
+					if (thirdLevelNode->getScore() > maxLoseSecondLevelScore)
+						maxLoseSecondLevelScore = thirdLevelNode->getScore();
+				}
 				secondLevelNode->setScore((-1) * maxLoseSecondLevelScore);
+			}
 			else
 				secondLevelNode->setScore(MaxScore);
 
@@ -228,6 +268,7 @@ MyTreeNode* MygameTree::chooseOrb() {
 			bestScore = firstLevelNode->getScore();
 			bestNode = firstLevelNode;
 		}
+
 	}
 	return bestNode;
 }
@@ -273,6 +314,7 @@ float MygameTree::BoardEvaluator(MyTreeNode* Node) {
 		for (int j = 0; j < COL; j++) {
 			if (board.get_cell_color(i, j) == colorPlayer) {
 				orbScore += cell_value_estimate(board.get_capacity(i, j), board.get_orbs_num(i, j));
+				orbScore += attack_value_estimate(i, j, board, colorPlayer);
 				orbPlayer++;
 			}
 			else if (board.get_cell_color(i, j) == colorOpponent) {
@@ -281,6 +323,7 @@ float MygameTree::BoardEvaluator(MyTreeNode* Node) {
 			}
 		}
 	}
+
 	if (orbOpponent == 0 && orbPlayer != 1) {
 		return MaxScore;
 	}
@@ -290,7 +333,6 @@ float MygameTree::BoardEvaluator(MyTreeNode* Node) {
 
 void algorithm_A(Board board, Player player, int index[]) {
 	MygameTree gt(board, &player);
-	int row, col;
 	MyTreeNode* choose = gt.chooseOrb();
 	index[0] = choose->getX();
 	index[1] = choose->getY();
